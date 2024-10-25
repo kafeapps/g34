@@ -1,5 +1,3 @@
-from typing import Optional, List, Dict
-from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -7,95 +5,82 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    TimeoutException,
-    NoSuchElementException,
-    ElementClickInterceptedException,
-    WebDriverException,
-    StaleElementReferenceException
-)
-import re
-import time
 
-app = FastAPI()
 
-# Função para criar o Selenium WebDriver
-def create_driver() -> webdriver.Chrome:
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--log-level=3")
-    chrome_options.add_argument("--disable-logging")
-    service = ChromeService(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=chrome_options)
+try:
+driver.get(full_url)
+        driver.implicitly_wait(10)
 
-# Função de scraping com Selenium
-def scrape_data(url: str, cod: str) -> Dict:
-    full_url = f"{url}?cod={cod}"
-    driver = create_driver()
-    output = {}
-    max_retries = 3
-    attempt = 0
+        div_principal = driver.find_element(By.CLASS_NAME, 'baTaGaYf')
+        html_div = div_principal.find_element(By.CSS_SELECTOR, 'div.bubble-element.HTML.baTaHaAaH')
 
-    while attempt < max_retries:
-        try:
-            driver.get(full_url)
-            driver.implicitly_wait(10)
+        # Trocar para o iframe
+        iframe = html_div.find_element(By.TAG_NAME, 'iframe')
+        driver.switch_to.frame(iframe)
 
-            # Trocar para o iframe
-            iframe = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
-            driver.switch_to.frame(iframe)
+        
+# Função para encontrar elementos com retry
+        def find_element_with_retry(by, value, retries=3):
+            for _ in range(retries):
+        def find_element_with_retry(by, value, retries=3, wait_time=1):
+            for attempt in range(retries):
+try:
+return WebDriverWait(driver, 10).until(EC.presence_of_element_located((by, value)))
+except StaleElementReferenceException:
+                    time.sleep(1)  # Esperar antes de tentar novamente
+            raise Exception(f"Não foi possível encontrar o elemento {value}")
+                    if attempt < retries - 1:  # Se não for a última tentativa, espere e tente novamente
+                        time.sleep(wait_time)
+                    else:
+                        raise Exception(f"Não foi possível encontrar o elemento {value} após {retries} tentativas.")
+                except TimeoutException:
+                    raise Exception(f"Tempo esgotado para encontrar o elemento {value}.")
+        
+        div_principal = find_element_with_retry(By.CLASS_NAME, 'baTaGaYf')
+        html_div = find_element_with_retry(By.CSS_SELECTOR, 'div.bubble-element.HTML.baTaHaAaH')
 
-            # Encontrar a div que contém os fundamentos
-            fundamentals_div = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div.tv-widget-fundamentals')))
+        # Trocar para o iframe
+        iframe = find_element_with_retry(By.TAG_NAME, 'iframe')
+        driver.switch_to.frame(iframe)
 
-            # Obter todas as seções de fundamentos
-            fundamental_sections = fundamentals_div.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__item--legacy-bg')
+tradingview_div = find_element_with_retry(By.CSS_SELECTOR, 'div.tradingview-widget-container')
+tradingview_iframe = find_element_with_retry(By.TAG_NAME, 'iframe', retries=5)
 
-            # Iterar sobre cada seção de fundamentos
-            for section in fundamental_sections:
-                # Obter o título da seção
-                title_element = section.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__title')
-                title_text = title_element.text.strip()
+fundamental_sections = fundamentals_div.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__item--legacy-bg')
 
-                # Inicializar lista para armazenar os valores da seção
-                if title_text not in output:
-                    output[title_text] = []
+for section in fundamental_sections:
+            title_element = section.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__title')
+            # Repetir a busca do título, pois o contexto do DOM pode mudar
+            title_element = find_element_with_retry(By.CSS_SELECTOR, '.tv-widget-fundamentals__title')
+title_text = title_element.text.strip()
 
-                # Obter todas as linhas de valores dentro da seção
-                value_rows = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__row')
+if title_text not in output:
+output[title_text] = []
 
-                for row in value_rows:
-                    label_element = row.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__label')
-                    value_element = row.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__value')
+value_labels = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__label')
+value_elements = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__value')
 
-                    label_text = label_element.text.strip()
-                    value_text = value_element.text.strip()
+for label, value in zip(value_labels, value_elements):
+label_text = label.text.strip()
+value_text = value.text.strip()
+value_cleaned = re.sub(r'[\u202a\u202c\u202f]', '', value_text)
+value_cleaned = value_cleaned.replace("\u2212", "-").replace("\u2014", "-")
 
-                    # Limpar valores
-                    value_cleaned = re.sub(r'[\u202a\u202c\u202f]', '', value_text)
-                    value_cleaned = value_cleaned.replace("\u2212", "-").replace("\u2014", "-")
+output[title_text].append({
+"label": label_text,
+"valor": value_cleaned
+})
 
-                    # Adicionar a label e valor ao output
-                    output[title_text].append({
-                        "label": label_text,
-                        "valor": value_cleaned
-                    })
+except Exception as e:
+output["error"] = str(e)
 
-            break  # Se o código for executado com sucesso, sai do loop
+finally:
+driver.quit()
 
-        except (Exception) as e:
-            attempt += 1
-            output["error"] = str(e)
-            time.sleep(2)  # Aguardar antes da próxima tentativa
-
-    driver.quit()
-    return output
+return output
 
 # Rota FastAPI para iniciar o scraping, com parâmetros URL e cod
 @app.get("/scrape")
 def scrape_endpoint(url: str, cod: str):
-    data = scrape_data(url, cod)
-    return data
+data = scrape_data(url, cod)
+return data
