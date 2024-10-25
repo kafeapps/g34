@@ -52,37 +52,43 @@ def scrape_data(url: str, cod: str):
                     else:
                         raise Exception(f"Não foi possível encontrar o elemento {value} após {retries} tentativas.")
 
-        div_principal = find_element_with_retry(By.CLASS_NAME, 'baTaGaYf')
-        html_div = find_element_with_retry(By.CSS_SELECTOR, 'div.bubble-element.HTML.baTaHaAaH')
-
         # Trocar para o iframe
         iframe = find_element_with_retry(By.TAG_NAME, 'iframe')
         driver.switch_to.frame(iframe)
 
-        tradingview_div = find_element_with_retry(By.CSS_SELECTOR, 'div.tradingview-widget-container')
-        tradingview_iframe = find_element_with_retry(By.TAG_NAME, 'iframe', retries=5)
-
-        driver.switch_to.frame(tradingview_iframe)
+        # Encontrar a div que contém os fundamentos
         fundamentals_div = find_element_with_retry(By.CSS_SELECTOR, 'div.tv-widget-fundamentals')
+        if fundamentals_div is None:
+            raise Exception("Fundamentals div não encontrada")
 
+        # Obter todas as seções de fundamentos
         fundamental_sections = fundamentals_div.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__item--legacy-bg')
+        print(f"Encontradas {len(fundamental_sections)} seções de fundamentos.")
 
+        # Iterar sobre cada seção de fundamentos
         for section in fundamental_sections:
-            title_element = find_element_with_retry(By.CSS_SELECTOR, '.tv-widget-fundamentals__title')  # Atualiza a busca
+            title_element = section.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__title')
             title_text = title_element.text.strip()
 
             if title_text not in output:
                 output[title_text] = []
 
-            value_labels = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__label')
-            value_elements = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__value')
+            # Obter todas as linhas de valores dentro da seção
+            value_rows = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__row')
+            print(f"Encontradas {len(value_rows)} linhas de valores na seção '{title_text}'.")
 
-            for label, value in zip(value_labels, value_elements):
-                label_text = label.text.strip()
-                value_text = value.text.strip()
+            for row in value_rows:
+                label_element = row.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__label')
+                value_element = row.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__value')
+
+                label_text = label_element.text.strip()
+                value_text = value_element.text.strip()
+
+                # Limpar valores
                 value_cleaned = re.sub(r'[\u202a\u202c\u202f]', '', value_text)
                 value_cleaned = value_cleaned.replace("\u2212", "-").replace("\u2014", "-")
 
+                # Adicionar a label e valor ao output
                 output[title_text].append({
                     "label": label_text,
                     "valor": value_cleaned
@@ -90,6 +96,7 @@ def scrape_data(url: str, cod: str):
 
     except Exception as e:
         output["error"] = str(e)
+        print(f"Ocorreu um erro: {e}")
 
     finally:
         driver.quit()
