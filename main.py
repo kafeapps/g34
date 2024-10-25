@@ -8,13 +8,19 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
+from selenium.common.exceptions import (
+    TimeoutException,
+    NoSuchElementException,
+    ElementClickInterceptedException,
+    WebDriverException,
+    StaleElementReferenceException
+)
+import re
 import time
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException, WebDriverException
 
 app = FastAPI()
 
-# Function to create the Selenium WebDriver
+# Função para criar o Selenium WebDriver
 def create_driver() -> webdriver.Chrome:
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--no-sandbox")
@@ -25,81 +31,70 @@ def create_driver() -> webdriver.Chrome:
     service = ChromeService(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=chrome_options)
 
-# Scraping function with Selenium
+# Função de scraping com Selenium
 def scrape_data(url: str, cod: str):
-    # Construct full URL
     full_url = f"{url}?cod={cod}"
-    driver = create_driver()  # Use the new create_driver function
+    driver = create_driver()
     output = {}
 
     try:
-        # Access the dynamic page
         driver.get(full_url)
-
-        # Wait for the page to load
         driver.implicitly_wait(10)
 
-        # Capture the main div with the desired class
         div_principal = driver.find_element(By.CLASS_NAME, 'baTaGaYf')
-
-        # Find the new class inside the main div
         html_div = div_principal.find_element(By.CSS_SELECTOR, 'div.bubble-element.HTML.baTaHaAaH')
 
-        # Switch to the iframe within html_div
+        # Trocar para o iframe
         iframe = html_div.find_element(By.TAG_NAME, 'iframe')
         driver.switch_to.frame(iframe)
 
-        # Wait for the tradingview-widget-container div inside the iframe
-        tradingview_div = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'div.tradingview-widget-container'))
-        )
+        # Função para encontrar elementos com retry
+        def find_element_with_retry(by, value, retries=3):
+            for _ in range(retries):
+                try:
+                    return WebDriverWait(driver, 10).until(EC.presence_of_element_located((by, value)))
+                except StaleElementReferenceException:
+                    time.sleep(1)  # Esperar antes de tentar novamente
+            raise Exception(f"Não foi possível encontrar o elemento {value}")
 
-        # Wait for the iframe within tradingview-widget-container
-        tradingview_iframe = WebDriverWait(tradingview_div, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, 'iframe'))
-        )
+        tradingview_div = find_element_with_retry(By.CSS_SELECTOR, 'div.tradingview-widget-container')
+        tradingview_iframe = find_element_with_retry(By.TAG_NAME, 'iframe', retries=5)
+
         driver.switch_to.frame(tradingview_iframe)
+        fundamentals_div = find_element_with_retry(By.CSS_SELECTOR, 'div.tv-widget-fundamentals')
 
-        # Wait for the div containing fundamentals
-        fundamentals_div = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'div.tv-widget-fundamentals'))
-        )
-
-        # Extract all sections within the fundamentals div
-        fundamental_sections = fundamentals_div.find_elements(By.CSS_SELECTOR,
-                                                              '.tv-widget-fundamentals__item--legacy-bg')
+        fundamental_sections = fundamentals_div.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__item--legacy-bg')
 
         for section in fundamental_sections:
-            # Get the title of each section
             title_element = section.find_element(By.CSS_SELECTOR, '.tv-widget-fundamentals__title')
             title_text = title_element.text.strip()
 
-            # Initialize the section in the output if it doesn't exist
             if title_text not in output:
                 output[title_text] = []
 
-            # Get all value elements in the section
+            value_labels = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__label')
             value_elements = section.find_elements(By.CSS_SELECTOR, '.tv-widget-fundamentals__value')
 
-            # If there are value elements, collect them
-            for value in value_elements:
+            for label, value in zip(value_labels, value_elements):
+                label_text = label.text.strip()
                 value_text = value.text.strip()
+                value_cleaned = re.sub(r'[\u202a\u202c\u202f]', '', value_text)
+                value_cleaned = value_cleaned.replace("\u2212", "-").replace("\u2014", "-")
+
                 output[title_text].append({
-                    "nome": title_text,
-                    "valor": value_text
+                    "label": label_text,
+                    "valor": value_cleaned
                 })
 
     except Exception as e:
         output["error"] = str(e)
 
     finally:
-        # Close the browser
         driver.quit()
 
     return output
 
-
-# FastAPI route to initiate scraping, with URL and cod parameters
+# Rota FastAPI para iniciar o scraping, com parâmetros URL e cod
 @app.get("/scrape")
 def scrape_endpoint(url: str, cod: str):
     data = scrape_data(url, cod)
